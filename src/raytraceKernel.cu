@@ -45,8 +45,22 @@ __host__ __device__ glm::vec3 generateRandomNumberFromThread(glm::vec2 resolutio
 //Function that does the initial raycast from the camera
 __host__ __device__ ray raycastFromCameraKernel(glm::vec2 resolution, float time, int x, int y, glm::vec3 eye, glm::vec3 view, glm::vec3 up, glm::vec2 fov){
   ray r;
-  r.origin = glm::vec3(0,0,0);
-  r.direction = glm::vec3(0,0,-1);
+  r.origin = eye;
+  float sx, sy;
+  sx = (float)x/((float)resolution.x-1);
+  sy = (float)y/((float)resolution.y-1);
+  glm::vec3 A = glm::cross(view,up);
+  glm::vec3 B = glm::cross(A,view);
+  double radian = fov.y/180.0*PI;
+  float tmp = tan(radian) * glm::length(view)/glm::length(B);
+  glm::vec3 V = B;
+  V*= tmp;
+  tmp = (float)resolution.x/(float)resolution.y*glm::length(view)/glm::length(A);
+  glm::vec3 H = A;
+  H*=tmp;
+  glm::vec3 p = eye + view + (2*sx-1)*H + (1-2*sy)*V;
+  r.direction = p-eye;
+  r.direction = glm::normalize(r.direction);
   return r;
 }
 
@@ -104,8 +118,8 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   int index = x + (y * resolution.x);
 
   if((x<=resolution.x && y<=resolution.y)){
+    ray r = raycastFromCameraKernel(resolution,time, x, y, cam.position, cam.view, cam.up, cam.fov);
 
-    colors[index] = generateRandomNumberFromThread(resolution, time, x, y);
    }
 }
 
@@ -127,22 +141,35 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   
   //package geometry and materials and sent to GPU
   staticGeom* geomList = new staticGeom[numberOfGeoms];
+  material* matList = new material[numberOfGeoms];
   for(int i=0; i<numberOfGeoms; i++){
-    staticGeom newStaticGeom;
+    staticGeom newStaticGeom;	
     newStaticGeom.type = geoms[i].type;
     newStaticGeom.materialid = geoms[i].materialid;
+
+	//material	
+	matList[i] = materials[newStaticGeom.materialid];
+
     newStaticGeom.translation = geoms[i].translations[frame];
     newStaticGeom.rotation = geoms[i].rotations[frame];
     newStaticGeom.scale = geoms[i].scales[frame];
     newStaticGeom.transform = geoms[i].transforms[frame];
     newStaticGeom.inverseTransform = geoms[i].inverseTransforms[frame];
     geomList[i] = newStaticGeom;
+
+
   }
   
   staticGeom* cudageoms = NULL;
   cudaMalloc((void**)&cudageoms, numberOfGeoms*sizeof(staticGeom));
   cudaMemcpy( cudageoms, geomList, numberOfGeoms*sizeof(staticGeom), cudaMemcpyHostToDevice);
   
+  material* mat = NULL;
+  cudaMalloc((void**)&mat, numberOfGeoms*sizeof(material));
+  cudaMemcpy(mat,matList,numberOfGeoms*sizeof(staticGeom),cudaMemcpyHostToDevice);
+
+
+
   //package camera
   cameraData cam;
   cam.resolution = renderCam->resolution;
