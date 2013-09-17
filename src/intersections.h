@@ -73,12 +73,7 @@ __host__ __device__ glm::vec3 getSignOfRay(ray r){
 __host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& intersectionPoint, glm::vec3& normal){
 	ray rt;
 	rt.origin = multiplyMV(box.inverseTransform,glm::vec4(r.origin,1.0f));
-	cudaMat4 inver2;;
-	inver2.x = box.inverseTransform.x;
-	inver2.y = box.inverseTransform.y;
-	inver2.z = box.inverseTransform.z;
-	inver2.w = glm::vec4(0,0,0,1.0f);
-	rt.direction = multiplyMV(inver2,glm::vec4(r.direction,1.0f));
+	rt.direction = glm::normalize(multiplyMV(box.inverseTransform,glm::vec4(r.direction,0)));
 	
 	float xmin = -0.5;
 	float xmax = 0.5;
