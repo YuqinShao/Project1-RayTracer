@@ -25,12 +25,12 @@
 #define ZERO_ABSORPTION_EPSILON     0.00001
 #define RAY_BIAS_AMOUNT             0.0002
 #define MaxDepth					5
-#define bgColorR					0
+#define bgColorR					0.3
 #define bgColorG					0
 #define bgColorB					0
-#define ambientColorR				0.3
-#define ambientColorG				0.3
-#define	ambientColorB				0.3
+#define ambientColorR				1
+#define ambientColorG				0
+#define	ambientColorB				0
 #define Kambient					0.2
 #define Kspecular					0.3
 #define Kdiffuse					0.5
