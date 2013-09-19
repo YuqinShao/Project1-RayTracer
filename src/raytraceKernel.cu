@@ -125,6 +125,7 @@ __host__ __device__ bool ShadowRayUnblocked(glm::vec3 point,glm::vec3 lightPos,s
 	ray r; r.origin = point;
 	r.direction = lightPos-point; r.direction = glm::normalize(r.direction);	
 	float objDist = -1;
+	float lightToObjDist = glm::length(lightPos - point);
 	for(int i = 0;i<numberOfGeoms;++i)
 	{
 		//if light source no need to check
@@ -136,10 +137,12 @@ __host__ __device__ bool ShadowRayUnblocked(glm::vec3 point,glm::vec3 lightPos,s
 			if(glm::length(geoms[i].translation - lightPos)<0.001)
 				continue;
 			tmpDist = sphereIntersectionTest(geoms[i],r,intersectionPoint,tmpnormal);							
-			if(abs(tmpDist+1)<EPSILON || abs(tmpDist)<=0.03)
+			if(abs(tmpDist+1)<EPSILON || abs(tmpDist)<=0.1)
 				continue;// obj not in shadow
 			else
 			{
+				if(lightToObjDist < tmpDist)
+					continue;
 				objDist = tmpDist;
 			}
 			
@@ -149,10 +152,12 @@ __host__ __device__ bool ShadowRayUnblocked(glm::vec3 point,glm::vec3 lightPos,s
 			if(glm::length(geoms[i].translation - lightPos)<0.0001)
 				continue;
 			tmpDist = boxIntersectionTest(geoms[i],r,intersectionPoint,tmpnormal);		
-			if(abs(tmpDist+1)< EPSILON || abs(tmpDist)<=0.03)	
+			if(abs(tmpDist+1)< EPSILON || abs(tmpDist)<=0.1)	
 				continue;
 			else
 			{
+				if(lightToObjDist < tmpDist)
+					continue;
 				objDist = tmpDist;
 			}				
 		}
@@ -164,11 +169,17 @@ __host__ __device__ bool ShadowRayUnblocked(glm::vec3 point,glm::vec3 lightPos,s
 }
 
 //recursive raytrace
-__host__ __device__ void raytrace(ray Ri,glm::vec2 resolution, float time, cameraData cam, int rayDepth, glm::vec3& color,
+__device__ void raytrace(ray Ri,glm::vec2 resolution, float time, cameraData cam, int rayDepth,int rayIndex, glm::vec3& color,
                             staticGeom* geoms, int numberOfGeoms,material* mats,int* lightIndex,int lightNum)
 {
+	if(rayIndex > rayDepth)
+	{
+		color = glm::vec3(bgColorR,bgColorG,bgColorB);
+		return;
+	}
 	/////////////variables//////////////	
 	ray Rr; //reflect ray
+	ray Rrl; // light reflect ray
 	glm::vec3 intersectionPoint(0,0,0);
 	glm::vec3 normal(0,0,0);
 	glm::vec3 tmpnormal(0,0,0);
@@ -176,7 +187,7 @@ __host__ __device__ void raytrace(ray Ri,glm::vec2 resolution, float time, camer
 	float tmpDist = -1;
 	glm::vec3 diffuseColor(0,0,0);
 	glm::vec3 specularColor(0,0,0);  
-	glm::vec3 reflectedColor(0,0,0);
+	glm::vec3 reflectedColor(1,1,1);
 	glm::vec3 refractColor(0,0,0);
 	glm::vec3 localColor(0,0,0);
 	int nearestObjIndex = -1; // nearest intersect object index
@@ -246,20 +257,33 @@ __host__ __device__ void raytrace(ray Ri,glm::vec2 resolution, float time, camer
 	//did hit object
 	else
 	{			
-		//printf("%d ",nearestObjIndex);
-		/*colors[index] = glm::vec3(abs(normal.x),abs(normal.y),abs(normal.z));
-		return;*/
+		// this is the reflect ray
 		Rr.direction = normal; 
 		Rr.direction *= glm::dot(Ri.direction,normal);
 		Rr.direction *= -2.0;
-		Rr.direction += Ri.direction;
+		Rr.direction += glm::normalize(Ri.direction);
 		Rr.origin = intersectionPoint;	
-		localColor += ambient* mats[nearestObjIndex].color;
-			
+		Rr.direction = glm::normalize(Rr.direction);
+		////////////////////////////////////////////////
+					
+
+		localColor += ambient * mats[nearestObjIndex].color;
+		if(mats[nearestObjIndex].hasReflective>0)
+		{
+			raytrace(Rr,resolution, time, cam, rayDepth,rayIndex+1,reflectedColor,geoms,numberOfGeoms,mats,lightIndex,lightNum);
+			color = glm::vec3(Kreflect*reflectedColor.x,Kreflect*reflectedColor.y,Kreflect*reflectedColor.z);
+			//printf("%f,%f,%f ::",reflectedColor.x,reflectedColor.y,reflectedColor.z);
+		}
 		//shadow check
 		for(int j = 0;j<lightNum;++j)
 		{
-			
+			//need a ray for specular highlight	
+			glm::vec3 lightVector = glm::normalize(intersectionPoint - geoms[lightIndex[j]].translation);			
+			Rrl.direction = normal;
+			Rrl.direction *= -2.0;
+			Rrl.direction *= glm::dot(lightVector,normal);
+			Rrl.direction += lightVector;
+
 			if(ShadowRayUnblocked(intersectionPoint,geoms[lightIndex[j]].translation,geoms,numberOfGeoms,mats) == true)
 			{
 				//not in shadow
@@ -273,9 +297,25 @@ __host__ __device__ void raytrace(ray Ri,glm::vec2 resolution, float time, camer
 				{
 					diffuseColor *= diffuseCon;
 					diffuseColor *= Kdiffuse;
-					diffuseColor *= mats[lightIndex[j]].color;
+					diffuseColor *= mats[lightIndex[j]].color * mats[lightIndex[j]].emittance;
 				}			
 				localColor += diffuseColor;
+				float specularCon = glm::dot(Rrl.direction,glm::normalize(cam.position-intersectionPoint));
+				
+				if(specularCon < 0)
+				{
+					specularCon = 0;
+					specularColor = glm::vec3(0,0,0);
+				}
+				else
+				{		
+					specularCon  = pow((double)specularCon,(double)mats[nearestObjIndex].specularExponent);
+					specularColor = mats[lightIndex[j]].color* mats[lightIndex[j]].emittance;
+					specularColor *= mats[nearestObjIndex].hasReflective * Kspecular;		
+					specularColor *= specularCon;
+				}
+			
+				localColor += specularColor;
 			/*	specularColor *= pow(glm::dot(Rr.direction,(cam.position-intersectionPoint)),mats[nearestObjIndex].specularExponent);
 				specularColor *= mats[lightIndex[j]].color;
 				localColor += specularColor;*/
@@ -290,7 +330,8 @@ __host__ __device__ void raytrace(ray Ri,glm::vec2 resolution, float time, camer
 //TODO: IMPLEMENT THIS FUNCTION
 //Core raytracer kernel
 __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, int rayDepth, glm::vec3* colors,
-                            staticGeom* geoms, int numberOfGeoms,material* mats,int* lightIndex,int lightNum){
+                            staticGeom* geoms, int numberOfGeoms,material* mats,int* lightIndex,int lightNum)
+{
 
   int x = (blockIdx.x * blockDim.x) + threadIdx.x;
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -299,7 +340,8 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   if((x<=resolution.x && y<=resolution.y)){
 		ray Ri; //indice ray
 		Ri = raycastFromCameraKernel(resolution, time, x,y,cam.position, cam.view, cam.up, cam.fov);
-		raytrace(Ri,resolution,time,cam,rayDepth,colors[index],geoms,numberOfGeoms,mats,lightIndex,lightNum);
+
+		raytrace(Ri,resolution,time,cam,rayDepth,0,colors[index],geoms,numberOfGeoms,mats,lightIndex,lightNum);
    }
 }
 
@@ -308,7 +350,7 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 // Wrapper for the __global__ call that sets up the kernel calls and does a ton of memory management
 void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iterations, material* materials, int numberOfMaterials, geom* geoms, int numberOfGeoms){
   
-  int traceDepth = 1; //determines how many bounces the raytracer traces
+  int traceDepth = 2; //determines how many bounces the raytracer traces
 
   // set up crucial magic
   int tileSize = 8;
@@ -364,6 +406,10 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   cam.view = renderCam->views[frame];
   cam.up = renderCam->ups[frame];
   cam.fov = renderCam->fov;
+
+  size_t size;
+  cudaDeviceSetLimit(cudaLimitStackSize,10000*sizeof(float));
+  cudaDeviceGetLimit(&size,cudaLimitStackSize);
 
   //kernel launches
   raytraceRay<<<fullBlocksPerGrid, threadsPerBlock>>>(renderCam->resolution, (float)iterations, cam, traceDepth, cudaimage, cudageoms, numberOfGeoms,cudamat,cudalightindex,lightNum);

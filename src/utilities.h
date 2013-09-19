@@ -25,15 +25,16 @@
 #define ZERO_ABSORPTION_EPSILON     0.00001
 #define RAY_BIAS_AMOUNT             0.0002
 #define MaxDepth					5
-#define bgColorR					0.1
-#define bgColorG					0.1
+#define bgColorR					0.25
+#define bgColorG					0.18
 #define bgColorB					0.1
 #define ambientColorR				1.0
 #define ambientColorG				1.0
 #define	ambientColorB				1.0
-#define Kambient					0.2
-#define Kspecular					0
-#define Kdiffuse					0.8
+#define Kambient					0.4
+#define Kspecular					0.3
+#define Kreflect					0.1
+#define Kdiffuse					0.1
 namespace utilityCore {
     extern float clamp(float f, float min, float max);
     extern bool replaceString(std::string& str, const std::string& from, const std::string& to);
