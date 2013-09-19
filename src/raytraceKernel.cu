@@ -115,7 +115,6 @@ __global__ void sendImageToPBO(uchar4* PBOpos, glm::vec2 resolution, glm::vec3* 
       PBOpos[index].z = color.z;
   }
 }
-
 /////shadow check
 __host__ __device__ bool ShadowRayUnblocked(glm::vec3 point,glm::vec3 lightPos,staticGeom* geoms, int numberOfGeoms,material* mats)
 {
@@ -125,7 +124,6 @@ __host__ __device__ bool ShadowRayUnblocked(glm::vec3 point,glm::vec3 lightPos,s
 	glm::vec3 intersectionPoint;
 	ray r; r.origin = point;
 	r.direction = lightPos-point; r.direction = glm::normalize(r.direction);	
-	//float distToLight = glm::length(lightPos - point);
 	float objDist = -1;
 	for(int i = 0;i<numberOfGeoms;++i)
 	{
@@ -165,6 +163,130 @@ __host__ __device__ bool ShadowRayUnblocked(glm::vec3 point,glm::vec3 lightPos,s
 		return false;	
 }
 
+//recursive raytrace
+__host__ __device__ void raytrace(ray Ri,glm::vec2 resolution, float time, cameraData cam, int rayDepth, glm::vec3& color,
+                            staticGeom* geoms, int numberOfGeoms,material* mats,int* lightIndex,int lightNum)
+{
+	/////////////variables//////////////	
+	ray Rr; //reflect ray
+	glm::vec3 intersectionPoint(0,0,0);
+	glm::vec3 normal(0,0,0);
+	glm::vec3 tmpnormal(0,0,0);
+	float interPointDist = -1;
+	float tmpDist = -1;
+	glm::vec3 diffuseColor(0,0,0);
+	glm::vec3 specularColor(0,0,0);  
+	glm::vec3 reflectedColor(0,0,0);
+	glm::vec3 refractColor(0,0,0);
+	glm::vec3 localColor(0,0,0);
+	int nearestObjIndex = -1; // nearest intersect object index
+	glm::vec3 ambient(ambientColorR,ambientColorG,ambientColorB);
+	ambient *= Kambient;
+	int nearestLight = -1;
+	float lightDist = -1;
+	float tmplightDist = -1;
+	////////////////////////////////////////////
+	color = glm::vec3(0,0,0);
+
+	for(int i = 0;i<numberOfGeoms;++i)
+	{
+		//if the object is light, continue to another
+		if(geoms[i].type == SPHERE )
+		{
+
+			tmpDist =  sphereIntersectionTest(geoms[i],Ri,intersectionPoint,tmpnormal);
+			if(tmpDist!=-1 &&(interPointDist==-1 ||(interPointDist!=-1 && tmpDist<interPointDist)))
+			{
+					
+				if(mats[i].emittance>0)
+				{
+					nearestLight = i;
+				}
+				else
+				{
+					nearestLight = -1;
+					interPointDist = tmpDist;
+					normal = tmpnormal;
+					nearestObjIndex = i;
+				}
+			}
+				
+		}
+		else if(geoms[i].type == CUBE)
+		{
+			
+			tmpDist = boxIntersectionTest(geoms[i],Ri,intersectionPoint,tmpnormal);
+			if(tmpDist!=-1 &&(interPointDist==-1 ||(interPointDist!=-1 && tmpDist<interPointDist)))
+			{
+				if(mats[i].emittance>0)
+					nearestLight = i;
+				else
+				{
+					nearestLight = -1;
+					interPointDist = tmpDist;
+					normal = tmpnormal;
+					nearestObjIndex = i;
+				}
+			}
+				
+		}
+	}
+
+	//if first ray didn't hit any object,color set to light / bg color
+	if(interPointDist == -1 ||(interPointDist!=-1 && nearestLight!=-1))
+	{
+		if(nearestLight != -1)
+		{
+			color = mats[nearestLight].color;
+		}
+		else
+			color = glm::vec3(bgColorR,bgColorG,bgColorB);
+		return;
+	}
+	//did hit object
+	else
+	{			
+		//printf("%d ",nearestObjIndex);
+		/*colors[index] = glm::vec3(abs(normal.x),abs(normal.y),abs(normal.z));
+		return;*/
+		Rr.direction = normal; 
+		Rr.direction *= glm::dot(Ri.direction,normal);
+		Rr.direction *= -2.0;
+		Rr.direction += Ri.direction;
+		Rr.origin = intersectionPoint;	
+		localColor += ambient* mats[nearestObjIndex].color;
+			
+		//shadow check
+		for(int j = 0;j<lightNum;++j)
+		{
+			
+			if(ShadowRayUnblocked(intersectionPoint,geoms[lightIndex[j]].translation,geoms,numberOfGeoms,mats) == true)
+			{
+				//not in shadow
+				//add diffuse 			
+				diffuseColor = mats[nearestObjIndex].color;								
+				glm::vec3 L = glm::normalize(geoms[lightIndex[j]].translation - intersectionPoint);
+				float diffuseCon = glm::dot(normal,L);
+				if(diffuseCon<0)
+					diffuseColor = glm::vec3(0,0,0);
+				else
+				{
+					diffuseColor *= diffuseCon;
+					diffuseColor *= Kdiffuse;
+					diffuseColor *= mats[lightIndex[j]].color;
+				}			
+				localColor += diffuseColor;
+			/*	specularColor *= pow(glm::dot(Rr.direction,(cam.position-intersectionPoint)),mats[nearestObjIndex].specularExponent);
+				specularColor *= mats[lightIndex[j]].color;
+				localColor += specularColor;*/
+			}
+		}
+	}
+	color += localColor;	
+}
+
+
+
 //TODO: IMPLEMENT THIS FUNCTION
 //Core raytracer kernel
 __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, int rayDepth, glm::vec3* colors,
@@ -174,144 +296,13 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
   int index = x + (y * resolution.x);
   
-  /*if(index == 0) { colors[index] = glm::vec3(0,1,0);return;}
-  if(index == resolution.x * resolution.y -1) {colors[index] = glm::vec3(0,1,0);return;}*/
   if((x<=resolution.x && y<=resolution.y)){
-		int rayIndex = 0;
 		ray Ri; //indice ray
-		ray Rr; //reflect ray
-		
-		 /////////////variables//////////////
-		glm::vec3 intersectionPoint(0,0,0);
-		glm::vec3 normal(0,0,0);
-		glm::vec3 tmpnormal(0,0,0);
-		float interPointDist = -1;
-		float tmpDist = -1;
-		glm::vec3 diffuseColor(0,0,0);
-		glm::vec3 specularColor(0,0,0);  
-		glm::vec3 reflectedColor(0,0,0);
-		glm::vec3 refractColor(0,0,0);
-		glm::vec3 localColor(0,0,0);
-		int nearestObjIndex = -1; // nearest intersect object index
-		glm::vec3 ambient(ambientColorR,ambientColorG,ambientColorB);
-		ambient *= Kambient;
-		int nearestLight = -1;
-		float lightDist = -1;
-		float tmplightDist = -1;
-		////////////////////////////////////////////
-		colors[index] = glm::vec3(0,0,0);
 		Ri = raycastFromCameraKernel(resolution, time, x,y,cam.position, cam.view, cam.up, cam.fov);
-		if(index == 446131)
-		{
-			printf("color %f,%f,%f  ",colors[index].x,colors[index].y,colors[index].z);
-		}
-		for(int i = 0;i<numberOfGeoms;++i)
-		{
-			//if the object is light, continue to another
-		/*	if(mats[i].emittance>0)
-				continue;*/
-			if(geoms[i].type == SPHERE )
-			{
-
-				tmpDist =  sphereIntersectionTest(geoms[i],Ri,intersectionPoint,tmpnormal);
-				if(tmpDist!=-1 &&(interPointDist==-1 ||(interPointDist!=-1 && tmpDist<interPointDist)))
-				{
-					
-					if(mats[i].emittance>0)
-					{
-						nearestLight = i;
-					}
-					else
-					{
-						nearestLight = -1;
-						interPointDist = tmpDist;
-						normal = tmpnormal;
-						nearestObjIndex = i;
-					}
-				}
-				
-			}
-			else if(geoms[i].type == CUBE)
-			{
-			
-				tmpDist = boxIntersectionTest(geoms[i],Ri,intersectionPoint,tmpnormal);
-				if(tmpDist!=-1 &&(interPointDist==-1 ||(interPointDist!=-1 && tmpDist<interPointDist)))
-				{
-					if(mats[i].emittance>0)
-						nearestLight = i;
-					else
-					{
-						nearestLight = -1;
-						interPointDist = tmpDist;
-						normal = tmpnormal;
-						nearestObjIndex = i;
-					}
-				}
-				
-			}
-		}
-		//if first ray didn't hit any object,color set to light / bg color
-		if(interPointDist == -1 ||(interPointDist!=-1 && nearestLight!=-1))
-		{
-			if(nearestLight != -1)
-			{
-				colors[index] = mats[nearestLight].color;
-			}
-			else
-				colors[index] = glm::vec3(bgColorR,bgColorG,bgColorB);
-			return;
-		}
-		//did hit object
-		else
-		{			
-			//printf("%d ",nearestObjIndex);
-			/*colors[index] = glm::vec3(abs(normal.x),abs(normal.y),abs(normal.z));
-			return;*/
-			Rr.direction = normal; 
-			Rr.direction *= glm::dot(Ri.direction,normal);
-			Rr.direction *= -2.0;
-			Rr.direction += Ri.direction;
-			Rr.origin = intersectionPoint;	
-			localColor += ambient* mats[nearestObjIndex].color;
-			
-			//shadow check
-			for(int j = 0;j<lightNum;++j)
-			{
-			
-				if(ShadowRayUnblocked(intersectionPoint,geoms[lightIndex[j]].translation,geoms,numberOfGeoms,mats) == true)
-				{
-					//not in shadow
-					//add diffuse 
-					if(index == 560400)
-					{
-						printf("debug: shadow unblocked");
-					}
-					diffuseColor = mats[nearestObjIndex].color;								
-					glm::vec3 L = glm::normalize(geoms[lightIndex[j]].translation - intersectionPoint);
-					float diffuseCon = glm::dot(normal,L);
-					if(diffuseCon<0)
-						diffuseColor = glm::vec3(0,0,0);
-					else
-					{
-						diffuseColor *= diffuseCon;
-						diffuseColor *= Kdiffuse;
-						diffuseColor *= mats[lightIndex[j]].color;
-					}			
-					localColor += diffuseColor;
-				/*	specularColor *= pow(glm::dot(Rr.direction,(cam.position-intersectionPoint)),mats[nearestObjIndex].specularExponent);
-					specularColor *= mats[lightIndex[j]].color;
-					localColor += specularColor;*/
-				}
-				//printf("get ambient %f,%f,%f",);
-			}
-		}
-		colors[index] += localColor;
-		if(index == 446131)
-		{
-			printf("color %f,%f,%f  ",colors[index].x,colors[index].y,colors[index].z);
-		}
+		raytrace(Ri,resolution,time,cam,rayDepth,colors[index],geoms,numberOfGeoms,mats,lightIndex,lightNum);
    }
 }
+
 
 //TODO: FINISH THIS FUNCTION
 // Wrapper for the __global__ call that sets up the kernel calls and does a ton of memory management
