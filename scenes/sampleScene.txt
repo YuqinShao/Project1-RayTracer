@@ -35,7 +35,7 @@ RSCTCOEFF   0
 EMITTANCE   0
 
 MATERIAL 3 				//red glossy
-RGB         .63 .06 .04      
+RGB         0.62 .06 .04      
 SPECEX      10      
 SPECRGB     1 1 1       
 REFL        0.1       
@@ -72,7 +72,7 @@ EMITTANCE   0
 
 MATERIAL 6 				//green glossy
 RGB         0.1 0.1 0.1      
-SPECEX      0     
+SPECEX      0    
 SPECRGB     1 1 1     
 REFL        1.0      
 REFR        0        
@@ -104,7 +104,7 @@ REFRIOR     0
 SCATTER     0        
 ABSCOEFF    0 0 0      
 RSCTCOEFF   0
-EMITTANCE   2
+EMITTANCE   15
 
 CAMERA
 RES         800 800

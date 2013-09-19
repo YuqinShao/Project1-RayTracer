@@ -15,7 +15,7 @@
 #include "intersections.h"
 #include "interactions.h"
 #include <vector>
-
+#include <time.h>
 #if CUDA_VERSION >= 5000
     #include <helper_math.h>
 #else
@@ -170,7 +170,7 @@ __host__ __device__ bool ShadowRayUnblocked(glm::vec3 point,glm::vec3 lightPos,s
 
 //recursive raytrace
 __device__ void raytrace(ray Ri,glm::vec2 resolution, float time, cameraData cam, int rayDepth,int rayIndex, glm::vec3& color,
-                            staticGeom* geoms, int numberOfGeoms,material* mats,int* lightIndex,int lightNum)
+                            staticGeom* geoms, int numberOfGeoms,material* mats,int* lightIndex,int lightNum,int threadIndex)
 {
 	if(rayIndex > rayDepth)
 	{
@@ -198,7 +198,7 @@ __device__ void raytrace(ray Ri,glm::vec2 resolution, float time, cameraData cam
 	float tmplightDist = -1;
 	////////////////////////////////////////////
 	color = glm::vec3(0,0,0);
-
+	glm::vec3 sumShadowColor(0,0,0);
 	for(int i = 0;i<numberOfGeoms;++i)
 	{
 		//if the object is light, continue to another
@@ -267,60 +267,76 @@ __device__ void raytrace(ray Ri,glm::vec2 resolution, float time, cameraData cam
 		////////////////////////////////////////////////
 					
 
-		localColor += ambient * mats[nearestObjIndex].color;
+		
 		if(mats[nearestObjIndex].hasReflective>0)
 		{
-			raytrace(Rr,resolution, time, cam, rayDepth,rayIndex+1,reflectedColor,geoms,numberOfGeoms,mats,lightIndex,lightNum);
+			raytrace(Rr,resolution, time, cam, rayDepth,rayIndex+1,reflectedColor,geoms,numberOfGeoms,mats,lightIndex,lightNum,threadIndex);
 			color = glm::vec3(mats[nearestObjIndex].hasReflective*reflectedColor.x,mats[nearestObjIndex].hasReflective*reflectedColor.y,mats[nearestObjIndex].hasReflective*reflectedColor.z);
 			//printf("%f,%f,%f ::",reflectedColor.x,reflectedColor.y,reflectedColor.z);
 		}
+		color += ambient * mats[nearestObjIndex].color;
 		//shadow check
 		for(int j = 0;j<lightNum;++j)
 		{
 			//need a ray for specular highlight	
-			glm::vec3 lightVector = glm::normalize(intersectionPoint - geoms[lightIndex[j]].translation);			
-			Rrl.direction = normal;
-			Rrl.direction *= -2.0;
-			Rrl.direction *= glm::dot(lightVector,normal);
-			Rrl.direction += lightVector;
-
-			if(ShadowRayUnblocked(intersectionPoint,geoms[lightIndex[j]].translation,geoms,numberOfGeoms,mats) == true)
-			{
-				//not in shadow
-				//add diffuse 			
-				diffuseColor = mats[nearestObjIndex].color;								
-				glm::vec3 L = glm::normalize(geoms[lightIndex[j]].translation - intersectionPoint);
-				float diffuseCon = glm::dot(normal,L);
-				if(diffuseCon<0)
-					diffuseColor = glm::vec3(0,0,0);
-				else
-				{
-					diffuseColor *= diffuseCon;
-					diffuseColor *= Kdiffuse;
-					diffuseColor *= mats[lightIndex[j]].color * mats[lightIndex[j]].emittance;
-				}			
-				localColor += diffuseColor;
-				float specularCon = glm::dot(Rrl.direction,glm::normalize(cam.position-intersectionPoint));
-				
-				if(specularCon < 0 || mats[nearestObjIndex].specularExponent == 0)
-				{
-					specularCon = 0;
-					specularColor = glm::vec3(0,0,0);
-				}
-				else
-				{	
-					
-					specularCon  = pow((double)specularCon,(double)mats[nearestObjIndex].specularExponent);
-					specularColor = mats[lightIndex[j]].color* mats[lightIndex[j]].emittance;
-					specularColor *= Kspecular;		
-					specularColor *= specularCon;
-				}
+			glm::vec3 lightVector;					
 			
-				localColor += specularColor;	
+			// if softshadow is on
+			if(softShadow == 1)
+			{
+				sumShadowColor = glm::vec3(0,0,0);
+				for(int samInd = 0;samInd<sampleNum;samInd++)
+				{
+					//generate random point in the light as position;
+					glm::vec3 lightPosition = getRandomPointOnCube(geoms[lightIndex[j]],hash(samInd));
+					//calculate light reflect ray
+					lightVector = glm::normalize(intersectionPoint - lightPosition);			
+					Rrl.direction = normal;
+					Rrl.direction *= -2.0;
+					Rrl.direction *= glm::dot(lightVector,normal);
+					Rrl.direction += lightVector;		
+					localColor = glm::vec3(0,0,0);
+					if(ShadowRayUnblocked(intersectionPoint,lightPosition,geoms,numberOfGeoms,mats) == true)
+					{
+						//not in shadow			
+						diffuseColor = mats[nearestObjIndex].color;								
+						glm::vec3 L = glm::normalize(lightPosition - intersectionPoint);
+						float diffuseCon = glm::dot(normal,L);
+						if(diffuseCon<0)
+							diffuseColor = glm::vec3(0,0,0);
+						else
+						{
+							diffuseColor *= diffuseCon;
+							diffuseColor *= Kdiffuse;
+							diffuseColor *= mats[lightIndex[j]].color;// * mats[lightIndex[j]].emittance;
+						}			
+						localColor += diffuseColor;
+						float specularCon = glm::dot(Rrl.direction,glm::normalize(cam.position-intersectionPoint));
+				
+						if(specularCon < 0 || mats[nearestObjIndex].specularExponent == 0)
+						{
+							specularCon = 0;
+							specularColor = glm::vec3(0,0,0);
+						}
+						else
+						{	
+					
+							specularCon  = pow((double)specularCon,(double)mats[nearestObjIndex].specularExponent);
+							specularColor = mats[lightIndex[j]].color;// * mats[lightIndex[j]].emittance;
+							specularColor *= Kspecular;		
+							specularColor *= specularCon;
+						}			
+						localColor += specularColor;	
+					}
+					sumShadowColor += localColor;
+				}
+				sumShadowColor *= mats[lightIndex[j]].emittance;
+				sumShadowColor /= (float)sampleNum;			
 			}
+		
 		}
 	}
-	color += localColor;	
+	color += sumShadowColor;	
 }
 
 
@@ -339,7 +355,7 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 		ray Ri; //indice ray
 		Ri = raycastFromCameraKernel(resolution, time, x,y,cam.position, cam.view, cam.up, cam.fov);
 
-		raytrace(Ri,resolution,time,cam,rayDepth,0,colors[index],geoms,numberOfGeoms,mats,lightIndex,lightNum);
+		raytrace(Ri,resolution,time,cam,rayDepth,0,colors[index],geoms,numberOfGeoms,mats,lightIndex,lightNum,index);
    }
 }
 

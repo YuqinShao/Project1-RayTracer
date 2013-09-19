@@ -9,6 +9,7 @@
 //-------------------------------
 //-------------MAIN--------------
 //-------------------------------
+// added for camera interaction
 void mouseClick(int button, int status,int x,int y);
 void mouseMotion(int x, int y);
 static bool r_buttonDown = false;
@@ -19,6 +20,8 @@ static int g_xlclick = 0;
 int mouse_old_x, mouse_old_y;
 glm::vec3 originPos;
 glm::vec3 originView;
+
+
 unsigned char button_mask = 0x00;
 int main(int argc, char** argv){
 
@@ -154,7 +157,7 @@ void runCuda(){
       
       gammaSettings gamma;
       gamma.applyGamma = true;
-      gamma.gamma = 1.0/2.2;
+      gamma.gamma = 1.0;
       gamma.divisor = renderCam->iterations;
       outputImage.setGammaSettings(gamma);
       string filename = renderCam->imageName;
