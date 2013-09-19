@@ -271,7 +271,7 @@ __device__ void raytrace(ray Ri,glm::vec2 resolution, float time, cameraData cam
 		if(mats[nearestObjIndex].hasReflective>0)
 		{
 			raytrace(Rr,resolution, time, cam, rayDepth,rayIndex+1,reflectedColor,geoms,numberOfGeoms,mats,lightIndex,lightNum);
-			color = glm::vec3(Kreflect*reflectedColor.x,Kreflect*reflectedColor.y,Kreflect*reflectedColor.z);
+			color = glm::vec3(mats[nearestObjIndex].hasReflective*reflectedColor.x,mats[nearestObjIndex].hasReflective*reflectedColor.y,mats[nearestObjIndex].hasReflective*reflectedColor.z);
 			//printf("%f,%f,%f ::",reflectedColor.x,reflectedColor.y,reflectedColor.z);
 		}
 		//shadow check
@@ -302,23 +302,21 @@ __device__ void raytrace(ray Ri,glm::vec2 resolution, float time, cameraData cam
 				localColor += diffuseColor;
 				float specularCon = glm::dot(Rrl.direction,glm::normalize(cam.position-intersectionPoint));
 				
-				if(specularCon < 0)
+				if(specularCon < 0 || mats[nearestObjIndex].specularExponent == 0)
 				{
 					specularCon = 0;
 					specularColor = glm::vec3(0,0,0);
 				}
 				else
-				{		
+				{	
+					
 					specularCon  = pow((double)specularCon,(double)mats[nearestObjIndex].specularExponent);
 					specularColor = mats[lightIndex[j]].color* mats[lightIndex[j]].emittance;
-					specularColor *= mats[nearestObjIndex].hasReflective * Kspecular;		
+					specularColor *= Kspecular;		
 					specularColor *= specularCon;
 				}
 			
-				localColor += specularColor;
-			/*	specularColor *= pow(glm::dot(Rr.direction,(cam.position-intersectionPoint)),mats[nearestObjIndex].specularExponent);
-				specularColor *= mats[lightIndex[j]].color;
-				localColor += specularColor;*/
+				localColor += specularColor;	
 			}
 		}
 	}
