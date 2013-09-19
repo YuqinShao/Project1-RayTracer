@@ -73,18 +73,19 @@ __host__ __device__ glm::vec3 getSignOfRay(ray r){
 __host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& intersectionPoint, glm::vec3& normal){
 	ray rt;
 	rt.origin = multiplyMV(box.inverseTransform,glm::vec4(r.origin,1.0f));
-	rt.direction = glm::normalize(multiplyMV(box.inverseTransform,glm::vec4(r.direction,0)));
-	
+	rt.direction = multiplyMV(box.inverseTransform,glm::vec4(r.direction,0));	
 	float xmin = -0.5;
 	float xmax = 0.5;
 	float ymin = -0.5;
 	float ymax = 0.5;
 	float zmin = -0.5;
 	float zmax = 0.5;
-	double tnear = -100000000000;
-	double tfar = 1000000000000;
+	double tnear = -1000000000000000000;
+	double tfar = 1000000000000000000;
 	double t1, t2,tmp;
+	
 	//xplaner
+	//if(abs(rt.direction.x) < EPSILON)
 	if(rt.direction.x == 0)
 	{
 		if(rt.origin.x>xmax || rt.origin.x<xmin)
@@ -108,6 +109,7 @@ __host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& 
 	}
 
 	//yplaner
+	//if(abs(rt.direction.y) < EPSILON)
 	if(rt.direction.y == 0)
 	{
 		if(rt.origin.y>ymax || rt.origin.y<ymin)
@@ -131,6 +133,7 @@ __host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& 
 		if(tfar <0) return -1;
 	}
 	//z	
+	//if(abs(rt.direction.z) < EPSILON)
 	if(rt.direction.z == 0)
 	{
 		if(rt.origin.z>zmax || rt.origin.z<zmin)
@@ -140,8 +143,8 @@ __host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& 
 	}
 	else
 	{
-		t1 = (ymin - rt.origin.z)/rt.direction.z;
-		t2 = (ymax - rt.origin.z)/rt.direction.z;
+		t1 = (zmin - rt.origin.z)/rt.direction.z;
+		t2 = (zmax - rt.origin.z)/rt.direction.z;
 		if(t1>t2)
 		{
 			tmp = t1;
@@ -153,25 +156,35 @@ __host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& 
 		if(tfar<tnear) return -1;
 		if(tfar <0) return -1;
 	}
-	glm::vec3 interp = getPointOnRay(rt,tnear);	
-	normal = glm::vec3(1,1,1);
-	if(abs(interp.x)-0.5<EPSILON )
+	//glm::vec3 interp = getPointOnRay(rt,tnear);	
+	glm::vec3 interp =rt.direction; interp*=tnear;
+	interp += rt.origin;
+	glm::vec3 objnormal = glm::vec3(0,0,0);
+	float maxv = max(abs(interp.x),abs(interp.y));
+	if(abs(interp.z)>maxv)
 	{
-		normal = glm::vec3(interp.x,0,0);
-		normal = glm::normalize(normal);
+		objnormal = glm::vec3(0,0,interp.z);
 	}
-	if(abs(interp.y)-0.5<EPSILON)
+	else
 	{
-		normal = glm::vec3(0,interp.y,0);
-		normal = glm::normalize(normal);
-	}
-	if(abs(interp.z)-0.5<EPSILON)
-	{
-		normal = glm::vec3(0,0,interp.z);
-		normal = glm::normalize(normal);
-	}
+		if(abs(interp.x)>abs(interp.y))
+		{
+			objnormal = glm::vec3(interp.x,0,0);
+		}
+		else
+		{
 
+			objnormal = glm::vec3(0,interp.y,0);
+		}
+	}
+	objnormal = glm::normalize(objnormal);	
+	normal = multiplyMV(box.transform,glm::vec4(objnormal,0));	
+	normal = glm::normalize(normal);
+	if(abs(normal.x) !=1 && abs(normal.y) !=1 && abs(normal.z) !=1)
+		printf("%f,%f,%f    ",normal.x,normal.y,normal.z);
 	intersectionPoint = multiplyMV(box.transform,glm::vec4(interp,1.0f));
+
+
 	return glm::length(intersectionPoint - r.origin);
 
 }

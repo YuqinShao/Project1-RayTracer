@@ -21,19 +21,19 @@
 #define TWO_PI                      6.2831853071795864769252867665590057683943
 #define SQRT_OF_ONE_THIRD           0.5773502691896257645091487805019574556476
 #define E                           2.7182818284590452353602874713526624977572
-#define EPSILON                     .000000001
+#define EPSILON                     .00000001
 #define ZERO_ABSORPTION_EPSILON     0.00001
 #define RAY_BIAS_AMOUNT             0.0002
 #define MaxDepth					5
-#define bgColorR					0.3
-#define bgColorG					0
-#define bgColorB					0
-#define ambientColorR				1
-#define ambientColorG				0
-#define	ambientColorB				0
+#define bgColorR					0.1
+#define bgColorG					0.1
+#define bgColorB					0.1
+#define ambientColorR				1.0
+#define ambientColorG				1.0
+#define	ambientColorB				1.0
 #define Kambient					0.2
-#define Kspecular					0.3
-#define Kdiffuse					0.5
+#define Kspecular					0
+#define Kdiffuse					0.8
 namespace utilityCore {
     extern float clamp(float f, float min, float max);
     extern bool replaceString(std::string& str, const std::string& from, const std::string& to);

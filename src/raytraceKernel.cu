@@ -22,6 +22,10 @@
     #include <cutil_math.h>
 #endif
 
+//#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 200)
+//#define  printf(f, ...) ((void)(f, __VA_ARGS__),0)  
+//#endif
+
 void checkCUDAError(const char *msg) {
   cudaError_t err = cudaGetLastError();
   if( cudaSuccess != err) {
@@ -44,23 +48,27 @@ __host__ __device__ glm::vec3 generateRandomNumberFromThread(glm::vec2 resolutio
 //TODO: IMPLEMENT THIS FUNCTION
 //Function that does the initial raycast from the camera
 __host__ __device__ ray raycastFromCameraKernel(glm::vec2 resolution, float time, int x, int y, glm::vec3 eye, glm::vec3 view, glm::vec3 up, glm::vec2 fov){
- ray r;
-  r.origin = eye;
+  ray r;
+  r.origin = eye; 
   float sx, sy;
+  //printf("%d,%d",x,y);
   sx = (float)x/((float)resolution.x-1);
   sy = (float)y/((float)resolution.y-1);
-  glm::vec3 A = glm::cross(view,up);
-  glm::vec3 B = glm::cross(A,view);
-  double radian = fov.x/180.0*PI;
+  glm::vec3 A = glm::normalize(glm::cross(view,up));
+  glm::vec3 B = glm::normalize(glm::cross(A,view));
+  double radian = (float)fov.y/180.0*PI;
   float tmp = tan(radian) * glm::length(view)/glm::length(B);
   glm::vec3 V = B;
   V*= tmp;
-  tmp = (float)resolution.x/(float)resolution.y*glm::length(view)/glm::length(A);
+  tmp = tan(radian) * (float)resolution.x/(float)resolution.y*glm::length(view)/glm::length(A);
   glm::vec3 H = A;
   H*=tmp;
-  glm::vec3 p = eye + view + (2*sx-1)*H + (1-2*sy)*V;
+  H *= (2.0*sx-1);
+  V *= (1-2.0*sy);
+  glm::vec3 p = eye + view + H + V;
   r.direction = p-eye;
   r.direction = glm::normalize(r.direction);
+  //r.direction = glm::normalize(r.direction);
   return r;
 }
 
@@ -111,32 +119,50 @@ __global__ void sendImageToPBO(uchar4* PBOpos, glm::vec2 resolution, glm::vec3* 
 /////shadow check
 __host__ __device__ bool ShadowRayUnblocked(glm::vec3 point,glm::vec3 lightPos,staticGeom* geoms, int numberOfGeoms,material* mats)
 {
-	return true;
+	//return true;
 	float tmpDist = -1;
 	glm::vec3 tmpnormal;
 	glm::vec3 intersectionPoint;
-	ray r; r.origin = point; r.direction = glm::normalize(lightPos-point);
+	ray r; r.origin = point;
+	r.direction = lightPos-point; r.direction = glm::normalize(r.direction);	
+	//float distToLight = glm::length(lightPos - point);
+	float objDist = -1;
 	for(int i = 0;i<numberOfGeoms;++i)
 	{
-		if(mats[i].emittance>0) continue;
+		//if light source no need to check
+		if(mats[i].emittance >0)
+			continue;
 		if(geoms[i].type == SPHERE )
-		{
-			tmpDist = sphereIntersectionTest(geoms[i],r,intersectionPoint,tmpnormal);
-			if(tmpDist != -1)
-				return false;
+		{			
+			//if same location as light, no need to check
+			if(glm::length(geoms[i].translation - lightPos)<0.001)
+				continue;
+			tmpDist = sphereIntersectionTest(geoms[i],r,intersectionPoint,tmpnormal);							
+			if(abs(tmpDist+1)<EPSILON || abs(tmpDist)<=0.03)
+				continue;// obj not in shadow
+			else
+			{
+				objDist = tmpDist;
+			}
+			
 		}
 		else if(geoms[i].type == CUBE)
-		{
-			tmpDist = boxIntersectionTest(geoms[i],r,intersectionPoint,tmpnormal);
-			if(tmpDist != -1)
-				return false;
+		{		
+			if(glm::length(geoms[i].translation - lightPos)<0.0001)
+				continue;
+			tmpDist = boxIntersectionTest(geoms[i],r,intersectionPoint,tmpnormal);		
+			if(abs(tmpDist+1)< EPSILON || abs(tmpDist)<=0.03)	
+				continue;
+			else
+			{
+				objDist = tmpDist;
+			}				
 		}
-	/*	else if(geoms[i].type == MESH)
-		{
-			;
-		}*/
 	}
-	return true;
+	if(objDist == -1)
+		return true;
+	else
+		return false;	
 }
 
 //TODO: IMPLEMENT THIS FUNCTION
@@ -147,18 +173,21 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   int x = (blockIdx.x * blockDim.x) + threadIdx.x;
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
   int index = x + (y * resolution.x);
-
+  
+  /*if(index == 0) { colors[index] = glm::vec3(0,1,0);return;}
+  if(index == resolution.x * resolution.y -1) {colors[index] = glm::vec3(0,1,0);return;}*/
   if((x<=resolution.x && y<=resolution.y)){
 		int rayIndex = 0;
 		ray Ri; //indice ray
 		ray Rr; //reflect ray
+		
 		 /////////////variables//////////////
 		glm::vec3 intersectionPoint(0,0,0);
 		glm::vec3 normal(0,0,0);
 		glm::vec3 tmpnormal(0,0,0);
 		float interPointDist = -1;
-		float tmpDist = 0;
-		glm::vec3 diffuseColor;
+		float tmpDist = -1;
+		glm::vec3 diffuseColor(0,0,0);
 		glm::vec3 specularColor(0,0,0);  
 		glm::vec3 reflectedColor(0,0,0);
 		glm::vec3 refractColor(0,0,0);
@@ -166,83 +195,121 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
 		int nearestObjIndex = -1; // nearest intersect object index
 		glm::vec3 ambient(ambientColorR,ambientColorG,ambientColorB);
 		ambient *= Kambient;
-		///////////////////////////////////
+		int nearestLight = -1;
+		float lightDist = -1;
+		float tmplightDist = -1;
+		////////////////////////////////////////////
 		colors[index] = glm::vec3(0,0,0);
-		/////////////////////////////
 		Ri = raycastFromCameraKernel(resolution, time, x,y,cam.position, cam.view, cam.up, cam.fov);
+		if(index == 446131)
+		{
+			printf("color %f,%f,%f  ",colors[index].x,colors[index].y,colors[index].z);
+		}
 		for(int i = 0;i<numberOfGeoms;++i)
 		{
 			//if the object is light, continue to another
-			if(mats[i].emittance>0)
-				continue;
+		/*	if(mats[i].emittance>0)
+				continue;*/
 			if(geoms[i].type == SPHERE )
 			{
-				tmpDist = sphereIntersectionTest(geoms[i],Ri,intersectionPoint,tmpnormal);
+
+				tmpDist =  sphereIntersectionTest(geoms[i],Ri,intersectionPoint,tmpnormal);
 				if(tmpDist!=-1 &&(interPointDist==-1 ||(interPointDist!=-1 && tmpDist<interPointDist)))
 				{
-					interPointDist = tmpDist;
-					normal = tmpnormal;
-					nearestObjIndex = i;
+					
+					if(mats[i].emittance>0)
+					{
+						nearestLight = i;
+					}
+					else
+					{
+						nearestLight = -1;
+						interPointDist = tmpDist;
+						normal = tmpnormal;
+						nearestObjIndex = i;
+					}
 				}
+				
 			}
 			else if(geoms[i].type == CUBE)
 			{
+			
 				tmpDist = boxIntersectionTest(geoms[i],Ri,intersectionPoint,tmpnormal);
 				if(tmpDist!=-1 &&(interPointDist==-1 ||(interPointDist!=-1 && tmpDist<interPointDist)))
 				{
-					interPointDist = tmpDist;
-					normal = tmpnormal;
-					nearestObjIndex = i;
+					if(mats[i].emittance>0)
+						nearestLight = i;
+					else
+					{
+						nearestLight = -1;
+						interPointDist = tmpDist;
+						normal = tmpnormal;
+						nearestObjIndex = i;
+					}
 				}
+				
 			}
-		/*	else if(geoms[i].type == MESH)
-			{
-				;
-			}*/		
 		}
 		//if first ray didn't hit any object,color set to light / bg color
-		if(interPointDist == -1)
+		if(interPointDist == -1 ||(interPointDist!=-1 && nearestLight!=-1))
 		{
-		
-			//check if the ray is parallel to any of the light source)
-			for(int l = 0; l<lightNum;++l)
+			if(nearestLight != -1)
 			{
-				//if parallel
-				colors[index] = mats[lightIndex[l]].color;
-				//else
-				colors[index] = glm::vec3(bgColorR,bgColorG,bgColorB);
+				colors[index] = mats[nearestLight].color;
 			}
+			else
+				colors[index] = glm::vec3(bgColorR,bgColorG,bgColorB);
 			return;
 		}
 		//did hit object
 		else
-		{
-	
+		{			
+			//printf("%d ",nearestObjIndex);
+			/*colors[index] = glm::vec3(abs(normal.x),abs(normal.y),abs(normal.z));
+			return;*/
 			Rr.direction = normal; 
 			Rr.direction *= glm::dot(Ri.direction,normal);
 			Rr.direction *= -2.0;
 			Rr.direction += Ri.direction;
 			Rr.origin = intersectionPoint;	
-			localColor += ambient;
+			localColor += ambient* mats[nearestObjIndex].color;
+			
 			//shadow check
 			for(int j = 0;j<lightNum;++j)
 			{
-				if(ShadowRayUnblocked(intersectionPoint,geoms[j].translation,geoms,numberOfGeoms,mats) == true)
+			
+				if(ShadowRayUnblocked(intersectionPoint,geoms[lightIndex[j]].translation,geoms,numberOfGeoms,mats) == true)
 				{
 					//not in shadow
-					//add diffuse 				
-					diffuseColor = mats[nearestObjIndex].color;
-					diffuseColor *= Kdiffuse;
-					diffuseColor *= glm::dot(normal,(geoms[lightIndex[j]].translation-intersectionPoint));
-					diffuseColor *= mats[lightIndex[j]].color;
+					//add diffuse 
+					if(index == 560400)
+					{
+						printf("debug: shadow unblocked");
+					}
+					diffuseColor = mats[nearestObjIndex].color;								
+					glm::vec3 L = glm::normalize(geoms[lightIndex[j]].translation - intersectionPoint);
+					float diffuseCon = glm::dot(normal,L);
+					if(diffuseCon<0)
+						diffuseColor = glm::vec3(0,0,0);
+					else
+					{
+						diffuseColor *= diffuseCon;
+						diffuseColor *= Kdiffuse;
+						diffuseColor *= mats[lightIndex[j]].color;
+					}			
 					localColor += diffuseColor;
-					specularColor *= pow(glm::dot(Rr.direction,(cam.position-intersectionPoint)),mats[nearestObjIndex].specularExponent);
+				/*	specularColor *= pow(glm::dot(Rr.direction,(cam.position-intersectionPoint)),mats[nearestObjIndex].specularExponent);
 					specularColor *= mats[lightIndex[j]].color;
-					localColor += specularColor;
-				}						
+					localColor += specularColor;*/
+				}
+				//printf("get ambient %f,%f,%f",);
 			}
 		}
 		colors[index] += localColor;
+		if(index == 446131)
+		{
+			printf("color %f,%f,%f  ",colors[index].x,colors[index].y,colors[index].z);
+		}
    }
 }
 
