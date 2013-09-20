@@ -354,7 +354,10 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   if((x<=resolution.x && y<=resolution.y)){
 		ray Ri; //indice ray
 		Ri = raycastFromCameraKernel(resolution, time, x,y,cam.position, cam.view, cam.up, cam.fov);
-
+		/*glm::vec3 point = getRandomPointOnSphere(geoms[5],hash(index));
+		point = glm::normalize(point);
+		colors[index] = glm::vec3(abs(point.x),abs(point.y),abs(point.z));
+		return;*/
 		raytrace(Ri,resolution,time,cam,rayDepth,0,colors[index],geoms,numberOfGeoms,mats,lightIndex,lightNum,index);
    }
 }

@@ -31,11 +31,11 @@
 #define ambientColorR				1.0
 #define ambientColorG				1.0
 #define	ambientColorB				1.0
-#define Kambient					0.4
+#define Kambient					0
 #define Kspecular					0.3
 #define Kdiffuse					0.1
 #define softShadow					1
-#define sampleNum					20
+#define sampleNum					800
 namespace utilityCore {
     extern float clamp(float f, float min, float max);
     extern bool replaceString(std::string& str, const std::string& from, const std::string& to);

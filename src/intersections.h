@@ -253,7 +253,7 @@ __host__ __device__ glm::vec3 getRandomPointOnCube(staticGeom cube, float random
     glm::vec3 radii = getRadiuses(cube);
     float side1 = radii.x * radii.y * 4.0f; //x-y face
     float side2 = radii.z * radii.y * 4.0f; //y-z face
-    float side3 = radii.x * radii.z* 4.0f; //x-z face
+    float side3 = radii.x * radii.z * 4.0f; //x-z face
     float totalarea = 2.0f * (side1+side2+side3);
     
     //pick random face, weighted by surface area
@@ -279,8 +279,7 @@ __host__ __device__ glm::vec3 getRandomPointOnCube(staticGeom cube, float random
     }else{
         //x-z-back face
         point = glm::vec3((float)u02(rng), -.5, (float)u02(rng));
-    }
-    
+    }    
     glm::vec3 randPoint = multiplyMV(cube.transform, glm::vec4(point,1.0f));
 
     return randPoint;
@@ -291,7 +290,18 @@ __host__ __device__ glm::vec3 getRandomPointOnCube(staticGeom cube, float random
 //Generates a random point on a given sphere
 __host__ __device__ glm::vec3 getRandomPointOnSphere(staticGeom sphere, float randomSeed){
 
-  return glm::vec3(0,0,0);
+	thrust::default_random_engine rng(hash(randomSeed));
+	thrust::uniform_real_distribution<float> theta(0,2.0*PI);
+	thrust::uniform_real_distribution<float> phi(0,PI);
+	//thrust::uniform_real_distribution<float> u(0,1);
+	float u = cos((float)phi(rng));
+	glm::vec3 point(0,0,0);
+	point.x = sqrt(1-u*u)*cos((float)theta(rng));
+	point.y = sqrt(1-u*u)*cos((float)theta(rng));
+	point.z = u;
+	glm::vec3 realPoint = multiplyMV(sphere.transform,glm::vec4(point,1.0f));
+	printf("%f,%f,%f  ",realPoint.x,realPoint.y,realPoint.z);
+	return realPoint;
 }
 
 #endif
