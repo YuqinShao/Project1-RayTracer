@@ -333,8 +333,51 @@ __device__ void raytrace(ray Ri,glm::vec2 resolution, float time, cameraData cam
 				sumShadowColor *= mats[lightIndex[j]].emittance;
 				sumShadowColor /= (float)sampleNum;			
 			}
-		
-		}
+			else
+			{
+				glm::vec3 lightPosition = geoms[lightIndex[j]].translation;
+				//calculate light reflect ray
+				lightVector = glm::normalize(intersectionPoint - lightPosition);			
+				Rrl.direction = normal;
+				Rrl.direction *= -2.0;
+				Rrl.direction *= glm::dot(lightVector,normal);
+				Rrl.direction += lightVector;		
+				localColor = glm::vec3(0,0,0);
+				if(ShadowRayUnblocked(intersectionPoint,lightPosition,geoms,numberOfGeoms,mats) == true)
+				{
+					//not in shadow			
+					diffuseColor = mats[nearestObjIndex].color;								
+					glm::vec3 L = glm::normalize(lightPosition - intersectionPoint);
+					float diffuseCon = glm::dot(normal,L);
+					if(diffuseCon<0)
+						diffuseColor = glm::vec3(0,0,0);
+					else
+					{
+						diffuseColor *= diffuseCon;
+						diffuseColor *= Kdiffuse;
+						diffuseColor *= mats[lightIndex[j]].color * mats[lightIndex[j]].emittance;
+					}			
+					localColor += diffuseColor;
+					float specularCon = glm::dot(Rrl.direction,glm::normalize(cam.position-intersectionPoint));
+				
+					if(specularCon < 0 || mats[nearestObjIndex].specularExponent == 0)
+					{
+						specularCon = 0;
+						specularColor = glm::vec3(0,0,0);
+					}
+					else
+					{	
+					
+						specularCon  = pow((double)specularCon,(double)mats[nearestObjIndex].specularExponent);
+						specularColor = mats[lightIndex[j]].color * mats[lightIndex[j]].emittance;
+						specularColor *= Kspecular;		
+						specularColor *= specularCon;
+					}			
+					localColor += specularColor;
+					sumShadowColor = localColor;
+				}			
+			}			
+		}	
 	}
 	color += sumShadowColor;	
 }
@@ -354,10 +397,6 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   if((x<=resolution.x && y<=resolution.y)){
 		ray Ri; //indice ray
 		Ri = raycastFromCameraKernel(resolution, time, x,y,cam.position, cam.view, cam.up, cam.fov);
-		/*glm::vec3 point = getRandomPointOnSphere(geoms[5],hash(index));
-		point = glm::normalize(point);
-		colors[index] = glm::vec3(abs(point.x),abs(point.y),abs(point.z));
-		return;*/
 		raytrace(Ri,resolution,time,cam,rayDepth,0,colors[index],geoms,numberOfGeoms,mats,lightIndex,lightNum,index);
    }
 }
